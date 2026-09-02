@@ -119,6 +119,12 @@ export const courseStore = {
     ensureLoaded()
     commit(courses.filter((c) => c.id !== id))
   },
+
+  /** 一键清除全部课程（整学期清空，不可恢复） */
+  clearAll() {
+    ensureLoaded()
+    commit([])
+  },
 }
 
 export interface ConflictCandidate {

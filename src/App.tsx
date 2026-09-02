@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import ImportAssistantModal from './components/ImportAssistantModal'
 import TermSettingsModal from './components/TermSettingsModal'
 import WeeklyGrid from './components/WeeklyGrid'
 import WeekToolbar from './components/WeekToolbar'
@@ -17,20 +18,24 @@ function App() {
   const currentWeek = weekNumberFor(term.startDate, new Date(), term.totalWeeks)
   const [selectedWeek, setSelectedWeek] = useState(currentWeek)
   const [showTermModal, setShowTermModal] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
 
   // 学期设置变化后，把当前查看周收敛到合法范围内
   useEffect(() => {
     setSelectedWeek((week) => minMax(week, 1, term.totalWeeks))
   }, [term.totalWeeks])
 
-  function onClose() {
-    setShowTermModal(false)
-  }
-
   return (
     <div className="app">
       <header className="app-header">
         <h1 className="app-title">课程表</h1>
+        <button
+          type="button"
+          className="header-import-btn"
+          onClick={() => setShowImportModal(true)}
+        >
+          导入
+        </button>
       </header>
 
       <div className="app-toolbar">
@@ -54,7 +59,11 @@ function App() {
       </footer>
 
       {showTermModal ? (
-        <TermSettingsModal term={term} onClose={onClose} />
+        <TermSettingsModal term={term} onClose={() => setShowTermModal(false)} />
+      ) : null}
+
+      {showImportModal ? (
+        <ImportAssistantModal onClose={() => setShowImportModal(false)} />
       ) : null}
     </div>
   )

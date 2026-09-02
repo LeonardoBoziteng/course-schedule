@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import { useCourses } from '../hooks/useCourses'
 import { courseInWeek } from '../lib/courseWeek'
-import { courseStore, findConflictingCourses } from '../lib/courseStore'
+import { courseStore } from '../lib/courseStore'
 import { PERIOD_COUNT, getPeriodTime } from '../lib/periods'
 import { WEEKDAYS, WEEKDAY_LABELS } from '../types'
 import type { Course, Weekday } from '../types'
@@ -122,6 +122,10 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
   const scrollRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
 
+  // 供全局监听使用的最新数据（effect 只挂载一次，避免读到旧 props/state）
+  const latestRef = useRef({ courses, selectedWeek })
+  latestRef.current = { courses, selectedWeek }
+
   // —— 拖拽状态（用 ref 存瞬态，state 只驱动视觉）——
   interface DragSession {
     course: Course
@@ -132,6 +136,7 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
   }
   const dragRef = useRef<DragSession | null>(null)
   const targetRef = useRef<DragTarget | null>(null)
+  const suppressClickRef = useRef(false)
   const [preview, setPreview] = useState<DragTarget | null>(null)
   const [activeCourseId, setActiveCourseId] = useState<string | null>(null)
 
@@ -192,16 +197,21 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
       }
     }
 
-    const conflict = findConflictingCourses(
-      {
-        weekday: target.weekday as Weekday,
-        startPeriod: target.startPeriod,
-        periods: target.periods,
-        weeks: course,
-      },
-      course.id,
+    // 冲突判定只看“当前查看的这一周”：该时段在当周是否真的有课
+    // （单/双周交错同格、不同周次的课程在当周不同时出现，不算冲突）
+    const week = latestRef.current.selectedWeek
+    const targetEnd = target.startPeriod + target.periods - 1
+    const conflict = latestRef.current.courses.some(
+      (c) =>
+        c.id !== course.id &&
+        c.weekday === target.weekday &&
+        courseInWeek(c, week) &&
+        !(
+          targetEnd < c.startPeriod ||
+          target.startPeriod > c.startPeriod + c.periods - 1
+        ),
     )
-    return { ...target, valid: conflict.length === 0 }
+    return { ...target, valid: !conflict }
   }
 
   // 全局指针监听：一次挂载，读取 ref 状态
@@ -240,6 +250,11 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
       dragRef.current = null
       if (!session) return
       if (session.moved) {
+        // 拖拽结束：抑制随后可能落到“空格新增/卡片编辑”上的 click
+        suppressClickRef.current = true
+        window.setTimeout(() => {
+          suppressClickRef.current = false
+        }, 0)
         const target = targetRef.current
         if (target && target.valid) {
           courseStore.updateCourse(session.course.id, {
@@ -261,17 +276,27 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
     function cancelDrag() {
       dragRef.current = null
       targetRef.current = null
+      suppressClickRef.current = false
       setPreview(null)
       setActiveCourseId(null)
+    }
+
+    function suppressClick(event: MouseEvent) {
+      if (suppressClickRef.current) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
     }
 
     window.addEventListener('pointermove', onPointerMove, { passive: false })
     window.addEventListener('pointerup', finishDrag)
     window.addEventListener('pointercancel', cancelDrag)
+    window.addEventListener('click', suppressClick, true)
     return () => {
       window.removeEventListener('pointermove', onPointerMove)
       window.removeEventListener('pointerup', finishDrag)
       window.removeEventListener('pointercancel', cancelDrag)
+      window.removeEventListener('click', suppressClick, true)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
