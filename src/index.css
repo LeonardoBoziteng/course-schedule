@@ -1,0 +1,472 @@
+:root {
+  --bg: #f4f6fb;
+  --card: #ffffff;
+  --text: #1d2533;
+  --text-secondary: #8a93a6;
+  --accent: #4f6bf6;
+  --border: #e3e8f3;
+
+  color-scheme: light;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue',
+    'Microsoft YaHei', 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #dfe4ee; /* 桌面端两侧留白底色，手机上被内容全屏覆盖 */
+  color: var(--text);
+  overscroll-behavior-y: none;
+}
+
+/* 内容限宽居中：电脑上模拟手机宽度，手机上仍是全屏 */
+.app {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+
+/* 超过手机宽度时（桌面预览）给一点卡片感，便于辨识内容区域 */
+@media (min-width: 481px) {
+  .app {
+    box-shadow: 0 0 28px rgba(29, 37, 51, 0.08);
+  }
+}
+
+.app-header {
+  padding: 20px 16px 10px;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.app-main {
+  flex: 1;
+  padding: 4px 0 14px;
+}
+
+.app-footer {
+  padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ===== 周视图 ===== */
+.week-grid {
+  position: relative;
+  width: 100%;
+}
+
+/* 固定节次栏 + 可横滑星期区 两栏布局 */
+.week-body {
+  display: flex;
+  align-items: flex-start;
+}
+
+/* 冻结在左侧的节次栏 */
+.week-gutter-panel {
+  display: grid;
+  flex: 0 0 auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-radius: 18px 0 0 18px;
+  overflow: hidden;
+}
+
+/* 星期列横向滚动区域 */
+.week-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.week-canvas {
+  position: relative;
+  display: grid;
+  width: max-content;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0 18px 18px 0;
+  overflow: hidden;
+}
+
+/* 网格分隔线（底层） */
+.grid-line-vertical,
+.grid-line-horizontal {
+  position: absolute;
+  z-index: 0;
+  background: var(--border);
+  pointer-events: none;
+}
+
+.grid-line-vertical {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.grid-line-horizontal {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+/* 顶栏 */
+.week-corner,
+.week-day-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef2fb;
+}
+
+.week-day-header {
+  position: relative;
+  z-index: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.week-day-header + .week-day-header {
+  border-left: 1px solid var(--border);
+}
+
+.week-day-header.weekend {
+  color: var(--text-secondary);
+  background: #f6f8fd;
+}
+
+.week-day-header.today {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* 左侧节次栏格子 */
+.week-period-gutter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: var(--card);
+}
+
+.week-corner + .week-period-gutter {
+  border-top: 1px solid var(--border);
+}
+
+.week-period-gutter + .week-period-gutter {
+  border-top: 1px solid var(--border);
+}
+
+.gutter-no {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+}
+
+.gutter-time {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+
+/* 空白格点击层 */
+.week-cell {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* 课程卡片（覆盖在空格点击层之上） */
+.course-slot {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  min-height: 0;
+  padding: 2px;
+  display: flex;
+}
+
+.course-card {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  font: inherit;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(24, 32, 64, 0.14);
+}
+
+.course-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #fff;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.course-location {
+  font-size: 10px;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.88);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 空状态引导浮层 */
+.empty-hint {
+  position: absolute;
+  top: 150px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 26px;
+  max-width: 240px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px dashed var(--border);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(29, 37, 51, 0.12);
+  pointer-events: none;
+}
+
+.empty-hint-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.empty-hint-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ===== 课程编辑弹层 ===== */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(15, 20, 35, 0.45);
+}
+
+.sheet {
+  width: min(480px, 100vw);
+  max-height: 88dvh;
+  overflow-y: auto;
+  background: var(--card);
+  border-radius: 20px 20px 0 0;
+  padding: 4px 20px calc(20px + env(safe-area-inset-bottom));
+  animation: sheet-up 0.22s ease;
+}
+
+@keyframes sheet-up {
+  from {
+    transform: translateY(28px);
+    opacity: 0.5;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  margin: 10px auto 14px;
+}
+
+.sheet-title {
+  margin: 0 0 16px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.form-row {
+  margin-bottom: 14px;
+}
+
+.form-row-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.input {
+  width: 100%;
+  font: inherit;
+  font-size: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+  appearance: none;
+}
+
+.input:focus {
+  border-color: var(--accent);
+}
+
+select.input {
+  appearance: auto;
+  padding: 9px 10px;
+  font-size: 15px;
+}
+
+.day-options {
+  display: flex;
+  gap: 6px;
+}
+
+.day-chip {
+  flex: 1;
+  padding: 9px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.day-chip.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.period-row {
+  display: flex;
+  gap: 10px;
+}
+
+.period-row .field {
+  flex: 1;
+}
+
+.range-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.color-options {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.color-swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  cursor: pointer;
+}
+
+.color-swatch.selected {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+.error-text {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #d92d20;
+}
+
+.sheet-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.btn {
+  border: 0;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 12px 18px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.btn-cancel {
+  background: #eef1f7;
+  color: var(--text);
+}
+
+.btn-danger {
+  background: #fee4e2;
+  color: #b42318;
+  margin-right: auto;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  flex: 1;
+  min-width: 96px;
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
