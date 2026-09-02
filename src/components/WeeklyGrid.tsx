@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useCourses } from '../hooks/useCourses'
+import { courseInWeek } from '../lib/courseWeek'
 import { PERIOD_COUNT, getPeriodTime } from '../lib/periods'
 import { WEEKDAYS, WEEKDAY_LABELS } from '../types'
 import type { Course } from '../types'
@@ -54,11 +55,13 @@ function CourseCard({
   name,
   location,
   color,
+  weekTag,
   onOpen,
 }: {
   name: string
   location: string
   color: string
+  weekTag: string | null
   onOpen: () => void
 }) {
   return (
@@ -68,15 +71,28 @@ function CourseCard({
       style={{ backgroundColor: color }}
       onClick={onOpen}
     >
-      <span className="course-name">{name}</span>
+      <span className="course-name">
+        {weekTag ? <span className="course-week-tag">{weekTag}</span> : null}
+        {name}
+      </span>
       {location ? <span className="course-location">{location}</span> : null}
     </button>
   )
 }
 
-export default function WeeklyGrid() {
+interface WeeklyGridProps {
+  /** 当前查看的是第几周（用于过滤单双周课程） */
+  selectedWeek: number
+  /** 学期总周数（透传给编辑弹层限制周区间） */
+  totalWeeks: number
+}
+
+export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps) {
   const courses = useCourses()
   const [editor, setEditor] = useState<CourseEditorState>(null)
+
+  // 只显示本周会上的课程
+  const visibleCourses = courses.filter((c) => courseInWeek(c, selectedWeek))
 
   // 今天对应的星期：JS getDay() 周日=0，转成 周一=1 … 周日=7
   const todayWeekday = ((new Date().getDay() + 6) % 7) + 1
@@ -155,8 +171,8 @@ export default function WeeklyGrid() {
               )),
             )}
 
-            {/* 课程卡片（覆盖在空格点击层之上） */}
-            {courses.map((course: Course) => (
+            {/* 课程卡片（覆盖在空格点击层之上，仅渲染本周课程） */}
+            {visibleCourses.map((course: Course) => (
               <div
                 key={course.id}
                 className="course-slot"
@@ -170,6 +186,13 @@ export default function WeeklyGrid() {
                   name={course.name}
                   location={course.location}
                   color={course.color}
+                  weekTag={
+                    course.weekType === 'odd'
+                      ? '单'
+                      : course.weekType === 'even'
+                        ? '双'
+                        : null
+                  }
                   onOpen={() => setEditor({ mode: 'edit', course })}
                 />
               </div>
@@ -186,7 +209,13 @@ export default function WeeklyGrid() {
         </div>
       ) : null}
 
-      {editor ? <CourseFormModal editor={editor} onClose={() => setEditor(null)} /> : null}
+      {editor ? (
+        <CourseFormModal
+          editor={editor}
+          totalWeeks={totalWeeks}
+          onClose={() => setEditor(null)}
+        />
+      ) : null}
     </div>
   )
 }

@@ -1,4 +1,10 @@
 import type { Course, CourseDraft, Weekday } from '../types'
+import {
+  lacksWeekFields,
+  normalizeCourse,
+  weeksOverlap,
+  type WeekWindow,
+} from './courseWeek'
 
 const STORAGE_KEY = 'kcs.courses.v1'
 
@@ -6,7 +12,7 @@ const STORAGE_KEY = 'kcs.courses.v1'
  * 课程数据存储层。
  * - 以 localStorage 持久化，数据仅保存在本机
  * - 内存中维护一份快照（稳定引用），供 React 订阅
- * - 写入/解析失败时静默降级为内存存储，不中断使用
+ * - 读取时自动兼容 V1 旧数据（补齐周次字段），写入/解析失败时静默降级
  */
 let courses: Course[] = []
 let loaded = false
@@ -16,38 +22,29 @@ function emit() {
   for (const listener of listeners) listener()
 }
 
-/** 基本字段校验，过滤掉被篡改/损坏的记录 */
-function isValidCourse(value: unknown): value is Course {
-  if (typeof value !== 'object' || value === null) return false
-  const c = value as Record<string, unknown>
-  return (
-    typeof c.id === 'string' &&
-    typeof c.name === 'string' &&
-    typeof c.location === 'string' &&
-    typeof c.teacher === 'string' &&
-    typeof c.weekday === 'number' && Number.isInteger(c.weekday) && c.weekday >= 1 && c.weekday <= 7 &&
-    typeof c.startPeriod === 'number' && Number.isInteger(c.startPeriod) && c.startPeriod >= 1 &&
-    typeof c.periods === 'number' && Number.isInteger(c.periods) && c.periods >= 1 &&
-    typeof c.color === 'string'
-  )
-}
-
-function parse(raw: string | null): Course[] {
-  if (raw === null) return []
+function parse(raw: string | null): { list: Course[]; migrated: boolean } {
+  if (raw === null) return { list: [], migrated: false }
   try {
     const data: unknown = JSON.parse(raw)
-    if (!Array.isArray(data)) return []
-    return data.filter(isValidCourse)
+    if (!Array.isArray(data)) return { list: [], migrated: false }
+    let migrated = false
+    const list: Course[] = []
+    for (const item of data) {
+      if (lacksWeekFields(item)) migrated = true
+      const course = normalizeCourse(item)
+      if (course) list.push(course)
+    }
+    return { list, migrated }
   } catch {
-    return []
+    return { list: [], migrated: false }
   }
 }
 
-function readFromStorage(): Course[] {
+function readFromStorage(): { list: Course[]; migrated: boolean } {
   try {
     return parse(localStorage.getItem(STORAGE_KEY))
   } catch {
-    return []
+    return { list: [], migrated: false }
   }
 }
 
@@ -62,8 +59,11 @@ function writeToStorage(list: Course[]) {
 
 function ensureLoaded() {
   if (loaded) return
-  courses = readFromStorage()
+  const { list, migrated } = readFromStorage()
+  courses = list
   loaded = true
+  // V1 数据迁移：读取后立即回写一次，补齐周次字段
+  if (migrated) writeToStorage(courses)
 }
 
 function newId(): string {
@@ -121,22 +121,31 @@ export const courseStore = {
   },
 }
 
+export interface ConflictCandidate {
+  weekday: Weekday
+  startPeriod: number
+  periods: number
+  weeks: WeekWindow
+}
+
 /**
- * 查找与指定时间段冲突的课程（可用于新增 / 编辑时的重叠校验）。
- * 时间重叠判定：两段时间 [a, a+lenA) 与 [b, b+lenB) 不相交的条件是 a+lenA<=b 或 b+lenB<=a。
+ * 查找与候选课程冲突的已存课程。
+ * 同时满足：同星期、时间段相交、周窗口相交。
  */
 export function findConflictingCourses(
-  weekday: Weekday,
-  startPeriod: number,
-  periods: number,
+  candidate: ConflictCandidate,
   excludeId?: string,
 ): Course[] {
   ensureLoaded()
-  const end = startPeriod + periods - 1
+  const end = candidate.startPeriod + candidate.periods - 1
   return courses.filter(
     (c) =>
-      c.weekday === weekday &&
+      c.weekday === candidate.weekday &&
       c.id !== excludeId &&
-      !(end < c.startPeriod || startPeriod > c.startPeriod + c.periods - 1),
+      !(
+        end < c.startPeriod ||
+        candidate.startPeriod > c.startPeriod + c.periods - 1
+      ) &&
+      weeksOverlap(c, candidate.weeks),
   )
 }
