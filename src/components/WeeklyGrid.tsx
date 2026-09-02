@@ -1,17 +1,26 @@
-import { useState } from 'react'
-import type { CSSProperties } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import { useCourses } from '../hooks/useCourses'
 import { courseInWeek } from '../lib/courseWeek'
+import { courseStore, findConflictingCourses } from '../lib/courseStore'
 import { PERIOD_COUNT, getPeriodTime } from '../lib/periods'
 import { WEEKDAYS, WEEKDAY_LABELS } from '../types'
-import type { Course } from '../types'
+import type { Course, Weekday } from '../types'
 import CourseFormModal, { type CourseEditorState } from './CourseFormModal'
 
 /* 周视图尺寸常量（像素） */
-const GUTTER_W = 64 // 左侧节次栏宽（需容纳「08:00–08:45」）
+const GUTTER_W = 64 // 左侧节次栏宽
 const DAY_W = 118 // 每个星期列宽
 const HEADER_H = 40 // 顶部星期栏高
 const ROW_H = 58 // 每节课行高
+/** 卡片底部多少像素内按下可进入“延长课时”模式 */
+const RESIZE_ZONE = 18
+/** 移动超过该距离才判定为拖拽（否则视为点击） */
+const MOVE_THRESHOLD = 8
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
 
 /** 可横滑区域的 7 个星期列 */
 function dayCols(): string {
@@ -51,31 +60,50 @@ function GridLines() {
   )
 }
 
+/** 拖拽目标（格子坐标） */
+interface DragTarget {
+  weekday: number
+  startPeriod: number
+  periods: number
+  valid: boolean
+}
+
 function CourseCard({
   name,
   location,
   color,
   weekTag,
-  onOpen,
+  dragging,
+  onPointerDown,
+  onOpenKeyboard,
 }: {
   name: string
   location: string
   color: string
   weekTag: string | null
-  onOpen: () => void
+  dragging: boolean
+  onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => void
+  onOpenKeyboard: () => void
 }) {
   return (
     <button
       type="button"
-      className="course-card"
+      className={dragging ? 'course-card is-dragging' : 'course-card'}
       style={{ backgroundColor: color }}
-      onClick={onOpen}
+      onPointerDown={onPointerDown}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpenKeyboard()
+        }
+      }}
     >
       <span className="course-name">
         {weekTag ? <span className="course-week-tag">{weekTag}</span> : null}
         {name}
       </span>
       {location ? <span className="course-location">{location}</span> : null}
+      <span className="card-resize-handle" aria-hidden="true" />
     </button>
   )
 }
@@ -91,11 +119,174 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
   const courses = useCourses()
   const [editor, setEditor] = useState<CourseEditorState>(null)
 
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
+
+  // —— 拖拽状态（用 ref 存瞬态，state 只驱动视觉）——
+  interface DragSession {
+    course: Course
+    mode: 'move' | 'resize'
+    startX: number
+    startY: number
+    moved: boolean
+  }
+  const dragRef = useRef<DragSession | null>(null)
+  const targetRef = useRef<DragTarget | null>(null)
+  const [preview, setPreview] = useState<DragTarget | null>(null)
+  const [activeCourseId, setActiveCourseId] = useState<string | null>(null)
+
   // 只显示本周会上的课程
   const visibleCourses = courses.filter((c) => courseInWeek(c, selectedWeek))
 
   // 今天对应的星期：JS getDay() 周日=0，转成 周一=1 … 周日=7
   const todayWeekday = ((new Date().getDay() + 6) % 7) + 1
+
+  /** 手指纵坐标对应的“行内第几节”候选（1 起），并夹取到边界内 */
+  function periodAt(clientY: number): number | null {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+    const rect = canvas.getBoundingClientRect()
+    if (clientY < rect.top + HEADER_H) return 1
+    const row = Math.floor((clientY - rect.top - HEADER_H) / ROW_H) + 1
+    return clamp(row, 1, PERIOD_COUNT)
+  }
+
+  function weekdayAt(clientX: number): number {
+    const canvas = canvasRef.current
+    if (!canvas) return 1
+    const rect = canvas.getBoundingClientRect()
+    const col = Math.floor((clientX - rect.left) / DAY_W)
+    return clamp(col + 1, 1, WEEKDAYS.length)
+  }
+
+  /** 根据拖拽会话与当前坐标算出目标格 */
+  function computeTarget(session: DragSession, clientX: number, clientY: number): DragTarget | null {
+    const course = session.course
+    const period = periodAt(clientY)
+    if (period === null) return null
+
+    let target: { weekday: number; startPeriod: number; periods: number }
+    if (session.mode === 'resize') {
+      target = {
+        weekday: course.weekday,
+        startPeriod: course.startPeriod,
+        periods: clamp(period - course.startPeriod + 1, 1, PERIOD_COUNT - course.startPeriod + 1),
+      }
+    } else {
+      const canvas = canvasRef.current
+      const slotTop =
+        (canvas?.getBoundingClientRect().top ?? 0) +
+        HEADER_H +
+        (course.startPeriod - 1) * ROW_H
+      // 保持手指相对卡片顶部的行偏移，避免拖拽时卡片“跳动”
+      const grabOffset = clamp(Math.floor((clientY - slotTop) / ROW_H), 0, course.periods - 1)
+      const startPeriod = clamp(
+        period - grabOffset,
+        1,
+        PERIOD_COUNT - course.periods + 1,
+      )
+      target = {
+        weekday: weekdayAt(clientX),
+        startPeriod,
+        periods: course.periods,
+      }
+    }
+
+    const conflict = findConflictingCourses(
+      {
+        weekday: target.weekday as Weekday,
+        startPeriod: target.startPeriod,
+        periods: target.periods,
+        weeks: course,
+      },
+      course.id,
+    )
+    return { ...target, valid: conflict.length === 0 }
+  }
+
+  // 全局指针监听：一次挂载，读取 ref 状态
+  useEffect(() => {
+    function autoScroll(clientX: number, clientY: number) {
+      const scroller = scrollRef.current
+      if (scroller) {
+        const rect = scroller.getBoundingClientRect()
+        if (clientX > rect.right - 46) scroller.scrollLeft += 14
+        else if (clientX < rect.left + 46) scroller.scrollLeft -= 14
+      }
+      if (clientY > window.innerHeight - 60) window.scrollBy(0, 16)
+      else if (clientY < 70) window.scrollBy(0, -16)
+    }
+
+    function onPointerMove(event: PointerEvent) {
+      const session = dragRef.current
+      if (!session) return
+      if (
+        !session.moved &&
+        Math.hypot(event.clientX - session.startX, event.clientY - session.startY) < MOVE_THRESHOLD
+      ) {
+        return
+      }
+      session.moved = true
+      event.preventDefault()
+      autoScroll(event.clientX, event.clientY)
+      const target = computeTarget(session, event.clientX, event.clientY)
+      targetRef.current = target
+      setPreview(target)
+      setActiveCourseId(session.course.id)
+    }
+
+    function finishDrag(event: PointerEvent) {
+      const session = dragRef.current
+      dragRef.current = null
+      if (!session) return
+      if (session.moved) {
+        const target = targetRef.current
+        if (target && target.valid) {
+          courseStore.updateCourse(session.course.id, {
+            weekday: target.weekday as Weekday,
+            startPeriod: target.startPeriod,
+            periods: target.periods,
+          })
+        }
+        // 冲突/越界：不保存，卡片留在原处（“回弹”）
+      } else if (event.type === 'pointerup') {
+        // 原地松手视为点击 → 打开编辑
+        setEditor({ mode: 'edit', course: session.course })
+      }
+      targetRef.current = null
+      setPreview(null)
+      setActiveCourseId(null)
+    }
+
+    function cancelDrag() {
+      dragRef.current = null
+      targetRef.current = null
+      setPreview(null)
+      setActiveCourseId(null)
+    }
+
+    window.addEventListener('pointermove', onPointerMove, { passive: false })
+    window.addEventListener('pointerup', finishDrag)
+    window.addEventListener('pointercancel', cancelDrag)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', finishDrag)
+      window.removeEventListener('pointercancel', cancelDrag)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function beginDrag(event: ReactPointerEvent<HTMLButtonElement>, course: Course) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const nearBottom = rect.bottom - event.clientY <= RESIZE_ZONE
+    dragRef.current = {
+      course,
+      mode: nearBottom ? 'resize' : 'move',
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    }
+  }
 
   return (
     <div className="week-grid">
@@ -129,9 +320,10 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
         </div>
 
         {/* 星期列横向滚动区域 */}
-        <div className="week-scroll">
+        <div className="week-scroll" ref={scrollRef}>
           <div
             className="week-canvas"
+            ref={canvasRef}
             style={{
               gridTemplateColumns: dayCols(),
               gridTemplateRows: gridRows(),
@@ -193,10 +385,20 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
                         ? '双'
                         : null
                   }
-                  onOpen={() => setEditor({ mode: 'edit', course })}
+                  dragging={activeCourseId === course.id}
+                  onPointerDown={(e) => beginDrag(e, course)}
+                  onOpenKeyboard={() => setEditor({ mode: 'edit', course })}
                 />
               </div>
             ))}
+
+            {/* 拖拽落点预览 */}
+            {preview ? (
+              <div
+                className={preview.valid ? 'drag-preview ok' : 'drag-preview bad'}
+                style={areaStyle(preview.weekday, preview.startPeriod + 1, preview.periods)}
+              />
+            ) : null}
           </div>
         </div>
       </div>

@@ -351,6 +351,53 @@ body {
   text-overflow: ellipsis;
 }
 
+/* 课程卡片可拖拽 */
+.course-card {
+  position: relative;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  padding-bottom: 13px;
+}
+
+.course-card.is-dragging {
+  opacity: 0.3;
+}
+
+/* 底部“延长课时”把手 */
+.card-resize-handle {
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  transform: translateX(-50%);
+  width: 26px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+}
+
+/* 拖拽落点预览 */
+.drag-preview {
+  position: relative;
+  z-index: 4;
+  margin: 2px;
+  border-radius: 10px;
+  border: 2px dashed transparent;
+  pointer-events: none;
+}
+
+.drag-preview.ok {
+  border-color: rgba(16, 185, 129, 0.85);
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.drag-preview.bad {
+  border-color: rgba(239, 68, 68, 0.9);
+  background: rgba(239, 68, 68, 0.12);
+}
+
 /* 空状态引导浮层 */
 .empty-hint {
   position: absolute;
