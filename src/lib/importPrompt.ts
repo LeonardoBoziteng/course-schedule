@@ -26,8 +26,8 @@ export const IMPORT_PROMPT_TEMPLATE = `你是一位课表数据整理助手。�
   "startPeriod": "起始节次，1到11的整数",
   "periods": "持续节数，>=1 的整数",
   "weekType": "'every'=每周 | 'odd'=单周(奇数周) | 'even'=双周(偶数周)",
-  "weekStart": "生效起始周；未给区间则填1",
-  "weekEnd": "生效结束周；未给则填该学期最大周数（若文字未说明学期周数则填20）"
+  "weekStart": "生效起始周（weekType 无论是否 every 都生效）；文字给了周号区间则照抄，没给填 1",
+  "weekEnd": "生效结束周（weekType 无论是否 every 都生效）；没给区间且不知学期周数则填 20"
 }
 
 【解析规则】
@@ -39,8 +39,17 @@ export const IMPORT_PROMPT_TEMPLATE = `你是一位课表数据整理助手。�
   startPeriod=5。错误示例：仅因为常见就输出 periods=2。
 - 同一门课因合并展开而重复出现多行的，若未见上述标注，请逐行各输出一条 periods=1，
   不要自行合并（应用端会自动合并）。
-- 周次识别："第1-16周"→weekStart=1,weekEnd=16；"单周"→weekType=odd，"双周/偶周"→even；
-  "每周/每周都上/没提周次"→every，且 weekStart/End 用文字给的区间，没有则 weekStart=1、weekEnd=20。
+- 周次识别（重点）：weekStart/weekEnd 表示“生效周区间”，weekType 表示该区间内的重复
+  方式（every=区间内每周都上，odd=区间内奇数周，even=区间内偶数周）。三者都受
+  weekStart..weekEnd 约束，**即便 weekType=every 也必须有正确区间**：
+  - 原文出现任何周号/周区间（如"第1-16周"）→ 必须照抄区间：weekStart=1、weekEnd=16，
+    weekType 按原文（通常 every）。
+  - 原文完全没提周次（"每周/整学期/没写"）→ weekStart=1、weekEnd=20、weekType=every。
+- 多段周（重点）：如果一门课不是连续周，而是**前面若干周和后面若干周上、中间不上**
+  （如"第1-4周、第13-20周上课"），一条记录无法表示。此时**把同一门课按每一段各拆成
+  一条记录**：每条记录除 weekStart/weekEnd 取各自段外，其余字段（name/location/teacher/
+  weekday/startPeriod/periods）完全一致；有多少段就拆几条，**不要合并，更不要把中间空档
+  补成上课周**。
 - 一周多次的同一门课（如周一和周三都有高等数学）拆成两条，各自保留自己时段的 weekday/
   startPeriod/periods，location/teacher 相同则都保留。
 - 地点教室（如 A-101）、时间等装饰信息不要写进 name。

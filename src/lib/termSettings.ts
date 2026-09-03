@@ -1,11 +1,22 @@
-const STORAGE_KEY = 'kcs.term.v1'
+/**
+ * 学期（Term）管理：
+ * - 支持多个学期并存（如不同学年/上下学期），每个学期独立的开学日期与总周数
+ * - 学期之间互不影响，课程数据通过 termId 归属到具体学期
+ * - 持久化 key：kcs.terms.v2（学期数组） / kcs.activeTerm.v2（当前激活学期 id）
+ * - 兼容旧版：kcs.term.v1 单学期数据会自动迁移为首个学期
+ */
+const TERMS_KEY = 'kcs.terms.v2'
+const ACTIVE_KEY = 'kcs.activeTerm.v2'
+const LEGACY_KEY = 'kcs.term.v1'
 
 export const DEFAULT_TOTAL_WEEKS = 20
 export const MAX_TOTAL_WEEKS = 30
 
-/** 学期设置 */
+/** 学期设置（id 标识唯一学期） */
 export interface TermSettings {
-  /** 学期名称（纯展示） */
+  /** 唯一 ID */
+  id: string
+  /** 学期名称（展示用，如 2025-2026学年第1学期） */
   name: string
   /** 总周数 */
   totalWeeks: number
@@ -13,7 +24,9 @@ export interface TermSettings {
   startDate: string
 }
 
-let term: TermSettings | null = null
+let terms: TermSettings[] = []
+let activeId = ''
+let loaded = false
 const listeners = new Set<() => void>()
 
 function emit() {
@@ -75,74 +88,179 @@ function validStartDate(value: unknown): string {
   return todayMondayString()
 }
 
-function load(): TermSettings {
-  const base: TermSettings = {
-    name: '本学期',
-    totalWeeks: DEFAULT_TOTAL_WEEKS,
-    startDate: todayMondayString(),
-  }
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return base
-    const data = JSON.parse(raw) as Record<string, unknown>
-    const totalWeeks =
-      typeof data.totalWeeks === 'number' &&
-      Number.isInteger(data.totalWeeks) &&
-      data.totalWeeks >= 1 &&
-      data.totalWeeks <= MAX_TOTAL_WEEKS
-        ? data.totalWeeks
-        : DEFAULT_TOTAL_WEEKS
-    return {
-      name:
-        typeof data.name === 'string' && data.name.trim()
-          ? data.name.trim().slice(0, 20)
-          : base.name,
-      totalWeeks,
-      startDate: validStartDate(data.startDate),
-    }
-  } catch {
-    return base
+function newId(): string {
+  return `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+/** 将未知数据清洗成合法学期，非法返回 null */
+function sanitizeTerm(data: unknown): TermSettings | null {
+  if (!data || typeof data !== 'object') return null
+  const item = data as Record<string, unknown>
+  const totalWeeks =
+    typeof item.totalWeeks === 'number' &&
+    Number.isInteger(item.totalWeeks) &&
+    item.totalWeeks >= 1 &&
+    item.totalWeeks <= MAX_TOTAL_WEEKS
+      ? item.totalWeeks
+      : DEFAULT_TOTAL_WEEKS
+  const name =
+    typeof item.name === 'string' && item.name.trim()
+      ? item.name.trim().slice(0, 40)
+      : '本学期'
+  return {
+    id: typeof item.id === 'string' && item.id ? item.id : newId(),
+    name,
+    totalWeeks,
+    startDate: validStartDate(item.startDate),
   }
 }
 
-function write(next: TermSettings) {
-  term = next
+/** 读取旧版单学期数据（kcs.term.v1），用于首次迁移 */
+function loadLegacy(): TermSettings | null {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    const raw = localStorage.getItem(LEGACY_KEY)
+    if (!raw) return null
+    const term = sanitizeTerm(JSON.parse(raw))
+    return term ? { ...term, id: 't_legacy' } : null
+  } catch {
+    return null
+  }
+}
+
+function loadTerms(): TermSettings[] {
+  try {
+    const raw = localStorage.getItem(TERMS_KEY)
+    if (raw) {
+      const data: unknown = JSON.parse(raw)
+      if (Array.isArray(data)) {
+        const list = data.map(sanitizeTerm).filter((t): t is TermSettings => t !== null)
+        if (list.length > 0) return list
+      }
+    }
+  } catch {
+    /* 损坏则重建 */
+  }
+  const legacy = loadLegacy()
+  if (legacy) return [legacy]
+  return [
+    {
+      id: 't_default',
+      name: '本学期',
+      totalWeeks: DEFAULT_TOTAL_WEEKS,
+      startDate: todayMondayString(),
+    },
+  ]
+}
+
+function persist() {
+  try {
+    localStorage.setItem(TERMS_KEY, JSON.stringify(terms))
+    localStorage.setItem(ACTIVE_KEY, activeId)
   } catch {
     console.warn('[termSettings] 保存失败，仅内存保留')
   }
-  emit()
+}
+
+function ensureLoaded() {
+  if (loaded) return
+  terms = loadTerms()
+  const savedActive = localStorage.getItem(ACTIVE_KEY)
+  activeId =
+    savedActive && terms.some((t) => t.id === savedActive) ? savedActive : terms[0].id
+  loaded = true
+  persist()
+}
+
+/** 返回学期总数（供其他模块在加载时拿到兜底学期） */
+export function termCount(): number {
+  ensureLoaded()
+  return terms.length
 }
 
 export const termSettings = {
   subscribe(listener: () => void) {
-    if (!term) term = load()
+    ensureLoaded()
     listeners.add(listener)
     return () => {
       listeners.delete(listener)
     }
   },
-  /** 返回学期设置（引用稳定） */
+  /** 当前激活学期（引用稳定，仅在变化时更新） */
   getSnapshot(): TermSettings {
-    if (!term) term = load()
-    return term
+    ensureLoaded()
+    const active = terms.find((t) => t.id === activeId) ?? terms[0]
+    return active
   },
   get(): TermSettings {
     return termSettings.getSnapshot()
   },
-  update(patch: Partial<TermSettings>) {
+  getTerms(): TermSettings[] {
+    ensureLoaded()
+    return terms
+  },
+  getActiveId(): string {
+    ensureLoaded()
+    return activeId
+  },
+  setActive(id: string) {
+    ensureLoaded()
+    if (!terms.some((t) => t.id === id)) return
+    if (activeId === id) return
+    activeId = id
+    persist()
+    emit()
+  },
+  /** 修改当前激活学期 */
+  update(patch: Partial<Omit<TermSettings, 'id'>>) {
+    ensureLoaded()
     const current = termSettings.getSnapshot()
     const next: TermSettings = {
       ...current,
-      ...patch,
+      name:
+        typeof patch.name === 'string'
+          ? patch.name.trim().slice(0, 40) || current.name
+          : current.name,
       totalWeeks:
         typeof patch.totalWeeks === 'number'
           ? Math.min(Math.max(Math.round(patch.totalWeeks), 1), MAX_TOTAL_WEEKS)
           : current.totalWeeks,
-      startDate: patch.startDate ? validStartDate(patch.startDate) : current.startDate,
-      name: typeof patch.name === 'string' ? patch.name.trim().slice(0, 20) || current.name : current.name,
+      startDate: patch.startDate
+        ? validStartDate(patch.startDate)
+        : current.startDate,
     }
-    write(next)
+    terms = terms.map((t) => (t.id === current.id ? next : t))
+    persist()
+    emit()
   },
+  /** 新增学期（会自动设为激活） */
+  add(data: Omit<TermSettings, 'id'>): TermSettings {
+    ensureLoaded()
+    const term: TermSettings = {
+      id: newId(),
+      name: data.name.trim().slice(0, 40) || '本学期',
+      totalWeeks: Math.min(Math.max(Math.round(data.totalWeeks), 1), MAX_TOTAL_WEEKS),
+      startDate: validStartDate(data.startDate),
+    }
+    terms = [...terms, term]
+    activeId = term.id
+    persist()
+    emit()
+    return term
+  },
+  /** 删除学期（至少保留一个；返回是否成功） */
+  remove(id: string): boolean {
+    ensureLoaded()
+    if (terms.length <= 1) return false
+    if (!terms.some((t) => t.id === id)) return false
+    terms = terms.filter((t) => t.id !== id)
+    if (activeId === id) activeId = terms[0].id
+    persist()
+    emit()
+    return true
+  },
+}
+
+/** 用于展示格式化：学期简称 */
+export function termShortName(term: TermSettings): string {
+  return term.name.length > 14 ? `${term.name.slice(0, 14)}…` : term.name
 }

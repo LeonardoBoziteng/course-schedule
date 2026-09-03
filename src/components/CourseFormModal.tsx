@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { COURSE_COLORS, DEFAULT_COURSE_COLOR } from '../lib/colors'
 import { courseStore, findConflictingCourses } from '../lib/courseStore'
+import { courseInWeek } from '../lib/courseWeek'
+import { effectivePlacement, overrideStore } from '../lib/overrideStore'
 import { PERIOD_COUNT, getPeriodTime } from '../lib/periods'
 import {
   WEEKDAYS,
@@ -22,6 +24,8 @@ interface Props {
   editor: Exclude<CourseEditorState, null>
   /** 学期总周数（决定周次区间可选范围） */
   totalWeeks: number
+  /** 当前正在查看/编辑的是第几周（编辑模式下位置只写到该周） */
+  week: number
   onClose: () => void
 }
 
@@ -29,23 +33,41 @@ function minMax(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
 }
 
+function samePlacement(
+  a: { weekday: Weekday; startPeriod: number; periods: number },
+  b: { weekday: Weekday; startPeriod: number; periods: number },
+): boolean {
+  return a.weekday === b.weekday && a.startPeriod === b.startPeriod && a.periods === b.periods
+}
+
 const WEEK_TYPES: WeekType[] = ['every', 'odd', 'even']
 
-export default function CourseFormModal({ editor, totalWeeks, onClose }: Props) {
+export default function CourseFormModal({ editor, totalWeeks, week, onClose }: Props) {
   const isEdit = editor.mode === 'edit'
   const existing = isEdit ? editor.course : null
+
+  // 编辑时位置初值 = 本周实际显示位置（可能含每周例外）
+  const effectiveNow =
+    isEdit && existing
+      ? effectivePlacement(existing, week, overrideStore.getSnapshot())
+      : null
 
   const [name, setName] = useState(existing?.name ?? '')
   const [location, setLocation] = useState(existing?.location ?? '')
   const [teacher, setTeacher] = useState(existing?.teacher ?? '')
   const [weekday, setWeekday] = useState<Weekday>(
-    existing?.weekday ?? (editor.mode === 'create' ? editor.weekday : 1),
+    (effectiveNow?.weekday as Weekday | undefined) ??
+      existing?.weekday ??
+      (editor.mode === 'create' ? editor.weekday : 1),
   )
   const [startPeriod, setStartPeriod] = useState<number>(
-    existing?.startPeriod ??
+    effectiveNow?.startPeriod ??
+      existing?.startPeriod ??
       (editor.mode === 'create' ? minMax(editor.startPeriod, 1, PERIOD_COUNT) : 1),
   )
-  const [periods, setPeriods] = useState<number>(existing?.periods ?? 1)
+  const [periods, setPeriods] = useState<number>(
+    effectiveNow?.periods ?? existing?.periods ?? 1,
+  )
   const [color, setColor] = useState(existing?.color ?? DEFAULT_COURSE_COLOR)
   const [error, setError] = useState('')
 
@@ -55,8 +77,6 @@ export default function CourseFormModal({ editor, totalWeeks, onClose }: Props) 
   const [weekEnd, setWeekEnd] = useState<number>(
     existing?.weekEnd ?? Math.max(totalWeeks, 1),
   )
-  const rangeOn = weekType !== 'every'
-
   // 节数上限：不能超出当天总节次
   const maxPeriods = PERIOD_COUNT - startPeriod + 1
   const safePeriods = minMax(periods, 1, maxPeriods)
@@ -73,6 +93,25 @@ export default function CourseFormModal({ editor, totalWeeks, onClose }: Props) 
         : `第 ${startPeriod}–${lastPeriod} 节 · ${firstTime.start}–${lastTime.end}`
       : `第 ${startPeriod} 节起，共 ${safePeriods} 节`
 
+  /** 编辑时：校验“当前这一周”是否与其他课程的实际显示位置冲突 */
+  function currentWeekConflictNames(): string[] {
+    if (!existing) return []
+    const overridesNow = overrideStore.getSnapshot()
+    const names: string[] = []
+    for (const c of courseStore.getCourses()) {
+      if (c.id === existing.id || c.termId !== existing.termId) continue
+      if (!courseInWeek(c, week)) continue
+      const p = effectivePlacement(c, week, overridesNow)
+      if (p.weekday !== weekday) continue
+      const cEnd = p.startPeriod + p.periods - 1
+      const myEnd = startPeriod + safePeriods - 1
+      if (!(myEnd < p.startPeriod || startPeriod > cEnd)) {
+        names.push(c.name)
+      }
+    }
+    return names
+  }
+
   function handleSubmit(event: FormEvent) {
     event.preventDefault()
     const trimmedName = name.trim()
@@ -80,47 +119,70 @@ export default function CourseFormModal({ editor, totalWeeks, onClose }: Props) 
       setError('请填写课程名称')
       return
     }
-    const conflict = findConflictingCourses(
-      {
-        weekday,
-        startPeriod,
-        periods: safePeriods,
-        weeks: {
-          weekType,
-          weekStart: safeWeekStart,
-          weekEnd: safeWeekEnd,
-        },
-      },
-      existing?.id,
-    )
-    if (conflict.length > 0) {
-      setError(`该时段已排「${conflict.map((c) => c.name).join('、')}」，请调整时间或周次`)
-      return
-    }
 
-    const data = {
+    const coreData = {
       name: trimmedName,
       location: location.trim(),
       teacher: teacher.trim(),
-      weekday,
-      startPeriod,
-      periods: safePeriods,
       color,
       weekType,
       weekStart: safeWeekStart,
       weekEnd: safeWeekEnd,
     }
+
     if (existing) {
-      courseStore.updateCourse(existing.id, data)
+      // —— 编辑模式 ——
+      const names = currentWeekConflictNames()
+      if (names.length > 0) {
+        setError(`第 ${week} 周该时段已排「${[...new Set(names)].join('、')}」，请调整时间或周次`)
+        return
+      }
+      // 颜色等身份信息写课程本体（所有周同步）
+      courseStore.updateCourse(existing.id, coreData)
+      // 位置（星期/节次/节数）只影响当前这一周
+      const desired = { weekday, startPeriod, periods: safePeriods }
+      const currentPlacement = effectivePlacement(existing, week, overrideStore.getSnapshot())
+      if (!samePlacement(currentPlacement, desired)) {
+        const basePlacement = {
+          weekday: existing.weekday,
+          startPeriod: existing.startPeriod,
+          periods: existing.periods,
+        }
+        if (samePlacement(desired, basePlacement)) {
+          // 与全局默认一致：撤销该周例外
+          overrideStore.remove(existing.id, week)
+        } else {
+          overrideStore.set(existing.id, existing.termId ?? '', week, desired)
+        }
+      }
     } else {
-      courseStore.addCourse(data)
+      // —— 新增模式（位置作为全局默认排布） ——
+      const conflict = findConflictingCourses(
+        {
+          weekday,
+          startPeriod,
+          periods: safePeriods,
+          weeks: {
+            weekType,
+            weekStart: safeWeekStart,
+            weekEnd: safeWeekEnd,
+          },
+        },
+        undefined,
+      )
+      if (conflict.length > 0) {
+        setError(`该时段已排「${conflict.map((c) => c.name).join('、')}」，请调整时间或周次`)
+        return
+      }
+      courseStore.addCourse({ ...coreData, weekday, startPeriod, periods: safePeriods })
     }
     onClose()
   }
 
   function handleDelete() {
     if (!existing) return
-    if (window.confirm(`删除「${existing.name}」？`)) {
+    if (window.confirm(`删除「${existing.name}」？该课程所有周都会一并移除。`)) {
+      overrideStore.removeCourse(existing.id)
       courseStore.removeCourse(existing.id)
       onClose()
     }
@@ -136,6 +198,11 @@ export default function CourseFormModal({ editor, totalWeeks, onClose }: Props) 
       <form className="sheet" onSubmit={handleSubmit}>
         <div className="sheet-handle" />
         <h2 className="sheet-title">{isEdit ? '编辑课程' : '添加课程'}</h2>
+        {isEdit ? (
+          <div className="edit-week-note">
+            位置（星期/节次/节数）只影响<strong>第 {week} 周</strong>；颜色、名称等对所有周生效
+          </div>
+        ) : null}
 
         <div className="form-row">
           <label className="form-row-label" htmlFor="course-name">
@@ -240,50 +307,56 @@ export default function CourseFormModal({ editor, totalWeeks, onClose }: Props) 
               </button>
             ))}
           </div>
-          {rangeOn ? (
-            <>
-              <div className="period-row week-range-row">
-                <div className="field">
-                  <select
-                    className="input"
-                    value={safeWeekStart}
-                    onChange={(e) => {
-                      const next = Number(e.target.value)
-                      setWeekStart(next)
-                      if (weekEnd < next) setWeekEnd(next)
-                    }}
-                  >
-                    {Array.from({ length: totalWeeks }, (_, i) => i + 1).map((w) => (
-                      <option key={w} value={w}>
-                        第 {w} 周起
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="field">
-                  <select
-                    className="input"
-                    value={safeWeekEnd}
-                    onChange={(e) => setWeekEnd(Number(e.target.value))}
-                  >
-                    {Array.from({ length: totalWeeks - safeWeekStart + 1 }, (_, i) => {
-                      const w = safeWeekStart + i
-                      return (
+          {(() => {
+            const label =
+              weekType === 'every'
+                ? '区间内每周都上'
+                : weekType === 'odd'
+                  ? '区间内单周(奇)上'
+                  : '区间内双周(偶)上'
+            return (
+              <>
+                <div className="period-row week-range-row">
+                  <div className="field">
+                    <select
+                      className="input"
+                      value={safeWeekStart}
+                      onChange={(e) => {
+                        const next = Number(e.target.value)
+                        setWeekStart(next)
+                        if (weekEnd < next) setWeekEnd(next)
+                      }}
+                    >
+                      {Array.from({ length: totalWeeks }, (_, i) => i + 1).map((w) => (
                         <option key={w} value={w}>
-                          到第 {w} 周止
+                          第 {w} 周起
                         </option>
-                      )
-                    })}
-                  </select>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <select
+                      className="input"
+                      value={safeWeekEnd}
+                      onChange={(e) => setWeekEnd(Number(e.target.value))}
+                    >
+                      {Array.from({ length: totalWeeks - safeWeekStart + 1 }, (_, i) => {
+                        const w = safeWeekStart + i
+                        return (
+                          <option key={w} value={w}>
+                            到第 {w} 周止
+                          </option>
+                        )
+                      })}
+                    </select>
+                  </div>
                 </div>
-              </div>
-              <div className="range-hint">
-                {WEEK_TYPE_LABELS[weekType]} · 第 {safeWeekStart}–{safeWeekEnd} 周
-              </div>
-            </>
-          ) : (
-            <div className="range-hint">每周固定上课</div>
-          )}
+                <div className="range-hint">
+                  {label} · 第 {safeWeekStart}–{safeWeekEnd} 周
+                </div>
+              </>
+            )
+          })()}
         </div>
 
         <div className="form-row">

@@ -7,6 +7,8 @@ import { parseExcelBuffer, type ParsedSheet } from '../lib/excelText'
 import { buildImportPrompt } from '../lib/importPrompt'
 import { parseImportText, validateImportData } from '../lib/importParser'
 import { useCourses } from '../hooks/useCourses'
+import { termSettings } from '../lib/termSettings'
+import { overrideStore } from '../lib/overrideStore'
 
 /** 两条候选课程是否在同一格（同星期、时间相交且周次相交） */
 function slotOverlap(a: CourseDraft, b: CourseDraft): boolean {
@@ -46,8 +48,10 @@ export default function ImportAssistantModal({ onClose }: Props) {
   const [excelSheets, setExcelSheets] = useState<ParsedSheet[]>([])
   const [excelActive, setExcelActive] = useState(0)
   const [excelText, setExcelText] = useState('')
-  // —— 数据管理 ——
-  const courseCount = useCourses().length
+  // —— 数据管理 ——（仅作用于当前激活学期）
+  const activeTermId = termSettings.getActiveId()
+  const activeTermName = termSettings.getSnapshot().name
+  const courseCount = useCourses().filter((c) => c.termId === activeTermId).length
   const [askClear, setAskClear] = useState(false)
 
   async function handleExcelFile(event: ChangeEvent<HTMLInputElement>) {
@@ -93,10 +97,11 @@ export default function ImportAssistantModal({ onClose }: Props) {
   }
 
   function handleClearAll() {
-    courseStore.clearAll()
+    courseStore.clearAll(activeTermId)
+    overrideStore.clearTerm(activeTermId)
     setAskClear(false)
     setStage(null)
-    setMessage({ tone: 'ok', text: '已清除本学期全部课程' })
+    setMessage({ tone: 'ok', text: `已清除「${activeTermName}」的全部课程` })
   }
 
   async function copyText(text: string) {
@@ -382,7 +387,7 @@ export default function ImportAssistantModal({ onClose }: Props) {
               disabled={courseCount === 0}
               onClick={() => setAskClear(true)}
             >
-              一键清除本学期课程（{courseCount} 门）
+              一键清除「{activeTermName}」课程（{courseCount} 门）
             </button>
           )}
         </div>

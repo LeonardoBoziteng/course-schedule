@@ -45,15 +45,20 @@ export interface Course {
   color: string
   /**
    * 周次类型：
-   * - every：每周都上（周次区间不生效）
-   * - odd：单周上（需配合 weekStart/weekEnd 区间）
-   * - even：双周上
+   * - every：区间内每周都上
+   * - odd：区间内奇数周上
+   * - even：区间内偶数周上
+   * 三种类型都受 weekStart..weekEnd 生效区间约束（默认覆盖整学期）。
    */
   weekType: WeekType
   /** 生效起始周（>=1；仅 odd/even 使用） */
   weekStart: number
   /** 生效结束周（>=weekStart；仅 odd/even 使用） */
   weekEnd: number
+  /**
+   * 所属学期 id（缺省时存储层会自动归属到当前激活学期）
+   */
+  termId?: string
 }
 
 /** 新增课程时传入的数据（id 由存储层生成） */

@@ -76,6 +76,46 @@ body {
   cursor: pointer;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 浏览/编辑 模式切换 */
+.mode-switch {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 11px;
+  background: #e8ecf5;
+  gap: 2px;
+}
+
+.mode-switch button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.mode-switch button.active {
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(24, 32, 64, 0.16);
+}
+
+/* 编辑模式的操作提示 */
+.mode-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 0 2px 8px;
+}
+
 .app-main {
   flex: 1;
   padding: 4px 0 14px;
@@ -379,6 +419,15 @@ body {
 
 .course-card.is-dragging {
   opacity: 0.3;
+}
+
+/* 浏览模式下课程卡只读：不暗示可拖拽/点击 */
+.course-card.readonly {
+  cursor: default;
+  touch-action: auto;
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
 }
 
 /* 底部“延长课时”把手 */
@@ -812,3 +861,148 @@ input[type='date'].input {
   cursor: not-allowed;
   transform: none;
 }
+
+/* ===== 学期切换 ===== */
+.term-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 8px;
+}
+
+.term-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 230px;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.term-chip svg {
+  flex: none;
+  color: var(--accent);
+}
+
+.term-chip:hover {
+  border-color: var(--accent);
+}
+
+.term-manage-btn {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 2px;
+}
+
+/* 学期管理弹层 */
+.term-tip {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* 编辑课程时：位置当周生效的提示 */
+.edit-week-note {
+  margin: -4px 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: rgba(79, 107, 246, 0.07);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.edit-week-note strong {
+  color: var(--accent);
+}
+
+.term-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.term-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 4px 6px 4px 10px;
+}
+
+.term-item.active {
+  border-color: var(--accent);
+  background: rgba(79, 107, 246, 0.06);
+}
+
+.term-item-main {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  padding: 6px 0;
+}
+
+.term-item-name {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.term-item-meta {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.term-item-del {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: #b42318;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px;
+}
+
+.term-create {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+.term-selects {
+  display: flex;
+  gap: 8px;
+}
+
+.term-selects .input {
+  flex: 1;
+}
+

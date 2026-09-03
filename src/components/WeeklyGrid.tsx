@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import { useCourses } from '../hooks/useCourses'
+import { useOverrides } from '../hooks/useOverrides'
 import { courseInWeek } from '../lib/courseWeek'
-import { courseStore } from '../lib/courseStore'
+import { effectivePlacement, overrideStore } from '../lib/overrideStore'
 import { PERIOD_COUNT, getPeriodTime } from '../lib/periods'
 import { WEEKDAYS, WEEKDAY_LABELS } from '../types'
 import type { Course, Weekday } from '../types'
@@ -74,6 +75,7 @@ function CourseCard({
   color,
   weekTag,
   dragging,
+  editable,
   onPointerDown,
   onOpenKeyboard,
 }: {
@@ -82,17 +84,24 @@ function CourseCard({
   color: string
   weekTag: string | null
   dragging: boolean
+  editable: boolean
   onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => void
   onOpenKeyboard: () => void
 }) {
   return (
     <button
       type="button"
-      className={dragging ? 'course-card is-dragging' : 'course-card'}
+      className={
+        dragging
+          ? 'course-card is-dragging'
+          : editable
+            ? 'course-card'
+            : 'course-card readonly'
+      }
       style={{ backgroundColor: color }}
       onPointerDown={onPointerDown}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        if (editable && (e.key === 'Enter' || e.key === ' ')) {
           e.preventDefault()
           onOpenKeyboard()
         }
@@ -103,32 +112,44 @@ function CourseCard({
         {name}
       </span>
       {location ? <span className="course-location">{location}</span> : null}
-      <span className="card-resize-handle" aria-hidden="true" />
+      {editable ? <span className="card-resize-handle" aria-hidden="true" /> : null}
     </button>
   )
 }
 
 interface WeeklyGridProps {
+  /** 展示/编辑的是哪个学期（课程与周次均以该学期为准） */
+  termId: string
   /** 当前查看的是第几周（用于过滤单双周课程） */
   selectedWeek: number
   /** 学期总周数（透传给编辑弹层限制周区间） */
   totalWeeks: number
+  /** false=仅浏览（禁止拖动/延长/新增/编辑）；true=编辑模式 */
+  editable: boolean
 }
 
-export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps) {
+export default function WeeklyGrid({
+  termId,
+  selectedWeek,
+  totalWeeks,
+  editable,
+}: WeeklyGridProps) {
   const courses = useCourses()
+  const overrides = useOverrides()
   const [editor, setEditor] = useState<CourseEditorState>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
 
   // 供全局监听使用的最新数据（effect 只挂载一次，避免读到旧 props/state）
-  const latestRef = useRef({ courses, selectedWeek })
-  latestRef.current = { courses, selectedWeek }
+  const latestRef = useRef({ courses, overrides, selectedWeek })
+  latestRef.current = { courses, overrides, selectedWeek }
 
   // —— 拖拽状态（用 ref 存瞬态，state 只驱动视觉）——
   interface DragSession {
     course: Course
+    /** 本周的实际显示位置（含每周例外），拖拽以此为基准 */
+    anchor: { weekday: Weekday; startPeriod: number; periods: number }
     mode: 'move' | 'resize'
     startX: number
     startY: number
@@ -140,8 +161,15 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
   const [preview, setPreview] = useState<DragTarget | null>(null)
   const [activeCourseId, setActiveCourseId] = useState<string | null>(null)
 
-  // 只显示本周会上的课程
-  const visibleCourses = courses.filter((c) => courseInWeek(c, selectedWeek))
+  // 只显示本周会上的、且属于当前学期的课程
+  const visibleCourses = courses.filter(
+    (c) => c.termId === termId && courseInWeek(c, selectedWeek),
+  )
+  // 叠加“每周位置例外”后，得到本周每个卡片的实际显示位置
+  const visibleRows = visibleCourses.map((course) => ({
+    course,
+    placement: effectivePlacement(course, selectedWeek, overrides),
+  }))
 
   // 今天对应的星期：JS getDay() 周日=0，转成 周一=1 … 周日=7
   const todayWeekday = ((new Date().getDay() + 6) % 7) + 1
@@ -166,51 +194,49 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
 
   /** 根据拖拽会话与当前坐标算出目标格 */
   function computeTarget(session: DragSession, clientX: number, clientY: number): DragTarget | null {
-    const course = session.course
+    const anchor = session.anchor
     const period = periodAt(clientY)
     if (period === null) return null
 
     let target: { weekday: number; startPeriod: number; periods: number }
     if (session.mode === 'resize') {
       target = {
-        weekday: course.weekday,
-        startPeriod: course.startPeriod,
-        periods: clamp(period - course.startPeriod + 1, 1, PERIOD_COUNT - course.startPeriod + 1),
+        weekday: anchor.weekday,
+        startPeriod: anchor.startPeriod,
+        periods: clamp(period - anchor.startPeriod + 1, 1, PERIOD_COUNT - anchor.startPeriod + 1),
       }
     } else {
       const canvas = canvasRef.current
       const slotTop =
         (canvas?.getBoundingClientRect().top ?? 0) +
         HEADER_H +
-        (course.startPeriod - 1) * ROW_H
+        (anchor.startPeriod - 1) * ROW_H
       // 保持手指相对卡片顶部的行偏移，避免拖拽时卡片“跳动”
-      const grabOffset = clamp(Math.floor((clientY - slotTop) / ROW_H), 0, course.periods - 1)
+      const grabOffset = clamp(Math.floor((clientY - slotTop) / ROW_H), 0, anchor.periods - 1)
       const startPeriod = clamp(
         period - grabOffset,
         1,
-        PERIOD_COUNT - course.periods + 1,
+        PERIOD_COUNT - anchor.periods + 1,
       )
       target = {
         weekday: weekdayAt(clientX),
         startPeriod,
-        periods: course.periods,
+        periods: anchor.periods,
       }
     }
 
-    // 冲突判定只看“当前查看的这一周”：该时段在当周是否真的有课
-    // （单/双周交错同格、不同周次的课程在当周不同时出现，不算冲突）
+    // 冲突判定只看“当前查看的这一周”：与本周其他卡片的实际显示位置比较
+    // （其他课程如有每周例外也按例外位置算；单/双周交错同格在当周不同时出现，不算冲突）
     const week = latestRef.current.selectedWeek
     const targetEnd = target.startPeriod + target.periods - 1
-    const conflict = latestRef.current.courses.some(
-      (c) =>
-        c.id !== course.id &&
-        c.weekday === target.weekday &&
-        courseInWeek(c, week) &&
-        !(
-          targetEnd < c.startPeriod ||
-          target.startPeriod > c.startPeriod + c.periods - 1
-        ),
-    )
+    const conflict = latestRef.current.courses.some((c) => {
+      if (c.id === session.course.id || c.termId !== session.course.termId) return false
+      if (!courseInWeek(c, week)) return false
+      const p = effectivePlacement(c, week, latestRef.current.overrides)
+      if (p.weekday !== target.weekday) return false
+      const cEnd = p.startPeriod + p.periods - 1
+      return !(targetEnd < p.startPeriod || target.startPeriod > cEnd)
+    })
     return { ...target, valid: !conflict }
   }
 
@@ -257,11 +283,17 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
         }, 0)
         const target = targetRef.current
         if (target && target.valid) {
-          courseStore.updateCourse(session.course.id, {
-            weekday: target.weekday as Weekday,
-            startPeriod: target.startPeriod,
-            periods: target.periods,
-          })
+          // 位置例外只写入“当前这一周”，不影响该课其他周
+          overrideStore.set(
+            session.course.id,
+            session.course.termId ?? termId,
+            latestRef.current.selectedWeek,
+            {
+              weekday: target.weekday as Weekday,
+              startPeriod: target.startPeriod,
+              periods: target.periods,
+            },
+          )
         }
         // 冲突/越界：不保存，卡片留在原处（“回弹”）
       } else if (event.type === 'pointerup') {
@@ -302,10 +334,13 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
   }, [])
 
   function beginDrag(event: ReactPointerEvent<HTMLButtonElement>, course: Course) {
+    if (!editable) return // 浏览模式：禁止拖动/延长
     const rect = event.currentTarget.getBoundingClientRect()
     const nearBottom = rect.bottom - event.clientY <= RESIZE_ZONE
     dragRef.current = {
       course,
+      // 以本周实际显示位置为基准（可能已含每周例外）
+      anchor: effectivePlacement(course, selectedWeek, overrides),
       mode: nearBottom ? 'resize' : 'move',
       startX: event.clientX,
       startY: event.clientY,
@@ -382,21 +417,29 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
                   type="button"
                   className="week-cell"
                   style={areaStyle(day, p + 1)}
-                  aria-label={`新增课程：${WEEKDAY_LABELS[day]} 第${p}节`}
-                  onClick={() => setEditor({ mode: 'create', weekday: day, startPeriod: p })}
+                  aria-label={
+                    editable
+                      ? `新增课程：${WEEKDAY_LABELS[day]} 第${p}节`
+                      : undefined
+                  }
+                  onClick={
+                    editable
+                      ? () => setEditor({ mode: 'create', weekday: day, startPeriod: p })
+                      : undefined
+                  }
                 />
               )),
             )}
 
             {/* 课程卡片（覆盖在空格点击层之上，仅渲染本周课程） */}
-            {visibleCourses.map((course: Course) => (
+            {visibleRows.map(({ course, placement }) => (
               <div
                 key={course.id}
                 className="course-slot"
                 style={areaStyle(
-                  course.weekday,
-                  course.startPeriod + 1,
-                  course.periods,
+                  placement.weekday,
+                  placement.startPeriod + 1,
+                  placement.periods,
                 )}
               >
                 <CourseCard
@@ -411,6 +454,7 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
                         : null
                   }
                   dragging={activeCourseId === course.id}
+                  editable={editable}
                   onPointerDown={(e) => beginDrag(e, course)}
                   onOpenKeyboard={() => setEditor({ mode: 'edit', course })}
                 />
@@ -428,8 +472,8 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
         </div>
       </div>
 
-      {/* 空状态引导（不拦截点击，点空格即可添加） */}
-      {courses.length === 0 ? (
+      {/* 空状态引导（仅当该学期还没有任何课程时显示） */}
+      {courses.filter((c) => c.termId === termId).length === 0 ? (
         <div className="empty-hint" aria-hidden="true">
           <span className="empty-hint-title">还没有课程</span>
           <span className="empty-hint-sub">点击任意空白格子即可添加</span>
@@ -440,6 +484,7 @@ export default function WeeklyGrid({ selectedWeek, totalWeeks }: WeeklyGridProps
         <CourseFormModal
           editor={editor}
           totalWeeks={totalWeeks}
+          week={selectedWeek}
           onClose={() => setEditor(null)}
         />
       ) : null}

@@ -5,6 +5,7 @@ import {
   weeksOverlap,
   type WeekWindow,
 } from './courseWeek'
+import { termSettings } from './termSettings'
 
 const STORAGE_KEY = 'kcs.courses.v1'
 
@@ -12,7 +13,7 @@ const STORAGE_KEY = 'kcs.courses.v1'
  * 课程数据存储层。
  * - 以 localStorage 持久化，数据仅保存在本机
  * - 内存中维护一份快照（稳定引用），供 React 订阅
- * - 读取时自动兼容 V1 旧数据（补齐周次字段），写入/解析失败时静默降级
+ * - 读取时自动兼容旧数据：补齐周次字段；缺 termId 的课程归属到当前激活学期
  */
 let courses: Course[] = []
 let loaded = false
@@ -60,10 +61,19 @@ function writeToStorage(list: Course[]) {
 function ensureLoaded() {
   if (loaded) return
   const { list, migrated } = readFromStorage()
-  courses = list
+  // 多学期迁移：缺 termId 的旧课程归属到当前激活学期（首次会落成第一个学期）
+  const fallbackTermId = termSettings.getActiveId()
+  let termMigrated = false
+  const assigned = list.map((c) => {
+    if (!c.termId) {
+      termMigrated = true
+      return { ...c, termId: fallbackTermId }
+    }
+    return c
+  })
+  courses = assigned
   loaded = true
-  // V1 数据迁移：读取后立即回写一次，补齐周次字段
-  if (migrated) writeToStorage(courses)
+  if (migrated || termMigrated) writeToStorage(courses)
 }
 
 function newId(): string {
@@ -100,10 +110,14 @@ export const courseStore = {
     return courses
   },
 
-  /** 新增课程并持久化，返回带 id 的完整课程 */
-  addCourse(draft: CourseDraft): Course {
+  /** 新增课程并持久化，返回带 id 的完整课程（缺省归属当前激活学期） */
+  addCourse(draft: CourseDraft, termId?: string): Course {
     ensureLoaded()
-    const course: Course = { ...draft, id: newId() }
+    const course: Course = {
+      ...draft,
+      id: newId(),
+      termId: termId ?? draft.termId ?? termSettings.getActiveId(),
+    }
     commit([...courses, course])
     return course
   },
@@ -120,10 +134,16 @@ export const courseStore = {
     commit(courses.filter((c) => c.id !== id))
   },
 
-  /** 一键清除全部课程（整学期清空，不可恢复） */
-  clearAll() {
+  /** 删除某学期的全部课程（删除学期时调用） */
+  removeByTerm(termId: string) {
     ensureLoaded()
-    commit([])
+    commit(courses.filter((c) => c.termId !== termId))
+  },
+
+  /** 一键清除当前学期的全部课程（不可恢复） */
+  clearAll(termId: string = termSettings.getActiveId()) {
+    ensureLoaded()
+    commit(courses.filter((c) => c.termId !== termId))
   },
 }
 
@@ -132,20 +152,24 @@ export interface ConflictCandidate {
   startPeriod: number
   periods: number
   weeks: WeekWindow
+  /** 候选课程所属学期；缺省视为当前激活学期 */
+  termId?: string
 }
 
 /**
- * 查找与候选课程冲突的已存课程。
- * 同时满足：同星期、时间段相交、周窗口相交。
+ * 查找与候选课程冲突的已存课程（仅限同一学期内）。
+ * 同时满足：同学期、同星期、时间段相交、周窗口相交。
  */
 export function findConflictingCourses(
   candidate: ConflictCandidate,
   excludeId?: string,
 ): Course[] {
   ensureLoaded()
+  const termId = candidate.termId ?? termSettings.getActiveId()
   const end = candidate.startPeriod + candidate.periods - 1
   return courses.filter(
     (c) =>
+      c.termId === termId &&
       c.weekday === candidate.weekday &&
       c.id !== excludeId &&
       !(

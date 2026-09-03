@@ -23,18 +23,20 @@ export function parityHit(weekType: WeekType, week: number): boolean {
   return weekType === 'odd' ? isOdd : !isOdd
 }
 
-/** 第 week 周是否会上这门课 */
+/** 第 week 周是否会上这门课（所有类型都要落在 weekStart..weekEnd 生效区间内） */
 export function courseInWeek(course: WeekWindow, week: number): boolean {
-  if (course.weekType === 'every') return true
   if (week < course.weekStart || week > course.weekEnd) return false
   return parityHit(course.weekType, week)
 }
 
-/** 两门课的周窗口是否有重叠（用于冲突检测） */
+/** 两门课的周窗口是否会在某些周同时命中（用于冲突检测） */
 export function weeksOverlap(a: WeekWindow, b: WeekWindow): boolean {
+  const lo = Math.max(a.weekStart, b.weekStart)
+  const hi = Math.min(a.weekEnd, b.weekEnd)
+  if (lo > hi) return false
   if (a.weekType === 'every' || b.weekType === 'every') return true
-  if (a.weekType !== b.weekType) return false
-  return Math.max(a.weekStart, b.weekStart) <= Math.min(a.weekEnd, b.weekEnd)
+  // 同为单周/同为双周：区间内必有同奇偶的周；奇偶不同则永远不重叠
+  return a.weekType === b.weekType
 }
 
 function clampInt(value: unknown, fallback: number): number {
