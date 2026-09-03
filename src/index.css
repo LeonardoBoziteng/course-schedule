@@ -109,6 +109,64 @@ body {
   box-shadow: 0 1px 3px rgba(24, 32, 64, 0.16);
 }
 
+/* 导出到系统日历（标题栏图标按钮） */
+.header-cal-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.header-cal-btn:active {
+  transform: scale(0.96);
+}
+
+/* 导出日历弹层 */
+.export-summary {
+  background: rgba(79, 107, 246, 0.06);
+  border: 1px solid rgba(79, 107, 246, 0.18);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.step-list b {
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+.export-warning {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  background: #fff7e6;
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+
+.error-text.ok-text {
+  color: #16794a;
+}
+
 /* 编辑模式的操作提示 */
 .mode-hint {
   font-size: 12px;
@@ -152,11 +210,27 @@ body {
 }
 
 .toolbar-title {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
   font-size: 13px;
   color: var(--text);
+  line-height: 1.25;
+}
+
+.toolbar-title-line {
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.toolbar-dates {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .toolbar-title b {
@@ -305,6 +379,19 @@ body {
   background: var(--accent);
   color: #fff;
   font-weight: 700;
+}
+
+/* 星期列头：星名在上、真实日期在下 */
+.week-day-header {
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.15;
+}
+
+.week-day-date {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.85;
 }
 
 /* 左侧节次栏格子 */

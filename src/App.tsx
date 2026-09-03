@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import ExportCalendarModal from './components/ExportCalendarModal'
 import ImportAssistantModal from './components/ImportAssistantModal'
 import TermManagerModal from './components/TermManagerModal'
 import TermSettingsModal from './components/TermSettingsModal'
@@ -6,7 +7,7 @@ import WeeklyGrid from './components/WeeklyGrid'
 import WeekToolbar from './components/WeekToolbar'
 import { useCourses } from './hooks/useCourses'
 import { useTermSettings } from './hooks/useTermSettings'
-import { weekNumberFor } from './lib/termSettings'
+import { termWeekRangeLabel, weekNumberFor } from './lib/termSettings'
 
 function minMax(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max)
@@ -21,6 +22,7 @@ function App() {
   const [showTermModal, setShowTermModal] = useState(false)
   const [showTermManager, setShowTermManager] = useState(false)
   const [showImportModal, setShowImportModal] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false)
   // view=仅浏览（锁定课表，防止误碰）；edit=可拖动/拖底延长/空格新增
   const [mode, setMode] = useState<'view' | 'edit'>(() => {
     const saved = localStorage.getItem('kcs.mode')
@@ -65,6 +67,20 @@ function App() {
               编辑
             </button>
           </div>
+          <button
+            type="button"
+            className="header-cal-btn"
+            aria-label="导出到系统日历提醒"
+            title="导出到系统日历提醒"
+            onClick={() => setShowExportModal(true)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 16H5V9h14v11zM7 11h5v5H7z"
+              />
+            </svg>
+          </button>
           {mode === 'edit' ? (
             <button
               type="button"
@@ -106,6 +122,7 @@ function App() {
           totalWeeks={term.totalWeeks}
           selectedWeek={selectedWeek}
           isCurrentWeek={selectedWeek === currentWeek}
+          dateRange={termWeekRangeLabel(term.startDate, selectedWeek)}
           onChangeWeek={(week) => setSelectedWeek(minMax(week, 1, term.totalWeeks))}
           onGoCurrent={() => setSelectedWeek(currentWeek)}
           onOpenSettings={() => setShowTermModal(true)}
@@ -118,6 +135,7 @@ function App() {
       <main className="app-main">
         <WeeklyGrid
           termId={term.id}
+          startDate={term.startDate}
           selectedWeek={selectedWeek}
           totalWeeks={term.totalWeeks}
           editable={mode === 'edit'}
@@ -139,6 +157,10 @@ function App() {
 
       {showImportModal ? (
         <ImportAssistantModal onClose={() => setShowImportModal(false)} />
+      ) : null}
+
+      {showExportModal ? (
+        <ExportCalendarModal term={term} onClose={() => setShowExportModal(false)} />
       ) : null}
     </div>
   )

@@ -88,8 +88,20 @@ export function normalizeCourse(value: unknown): Course | null {
     weekType: isWeekType(c.weekType) ? c.weekType : 'every',
     weekStart,
     weekEnd,
+    remindMinutes: clampRemind(c.remindMinutes),
   }
 }
+
+/** 提醒提前分钟数：-1 不提醒、0 上课时、>0 提前 N 分钟；默认 10 */
+function clampRemind(value: unknown): number {
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    if (value === -1) return -1
+    if (value >= 0 && value <= 180) return value
+  }
+  return 10
+}
+
+export const DEFAULT_REMIND_MINUTES = 10
 
 /** 旧数据是否缺少周次字段（用于迁移后回写一次） */
 export function lacksWeekFields(value: unknown): boolean {

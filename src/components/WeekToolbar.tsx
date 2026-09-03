@@ -3,6 +3,8 @@ interface WeekToolbarProps {
   totalWeeks: number
   selectedWeek: number
   isCurrentWeek: boolean
+  /** 本周的真实日期范围，如 "9/7–9/13"；无则隐藏 */
+  dateRange?: string | null
   onChangeWeek: (week: number) => void
   onGoCurrent: () => void
   onOpenSettings: () => void
@@ -13,6 +15,7 @@ export default function WeekToolbar({
   totalWeeks,
   selectedWeek,
   isCurrentWeek,
+  dateRange,
   onChangeWeek,
   onGoCurrent,
   onOpenSettings,
@@ -30,7 +33,10 @@ export default function WeekToolbar({
           ‹
         </button>
         <span className="toolbar-title">
-          {termName} · 第 <b>{selectedWeek}</b> 周 / {totalWeeks}
+          <span className="toolbar-title-line">
+            {termName} · 第 <b>{selectedWeek}</b> 周 / {totalWeeks}
+          </span>
+          {dateRange ? <span className="toolbar-dates">{dateRange}</span> : null}
         </span>
         <button
           type="button"

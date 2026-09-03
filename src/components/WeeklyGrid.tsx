@@ -5,6 +5,7 @@ import { useOverrides } from '../hooks/useOverrides'
 import { courseInWeek } from '../lib/courseWeek'
 import { effectivePlacement, overrideStore } from '../lib/overrideStore'
 import { PERIOD_COUNT, getPeriodTime } from '../lib/periods'
+import { monthDay, termWeekdayDate } from '../lib/termSettings'
 import { WEEKDAYS, WEEKDAY_LABELS } from '../types'
 import type { Course, Weekday } from '../types'
 import CourseFormModal, { type CourseEditorState } from './CourseFormModal'
@@ -120,6 +121,8 @@ function CourseCard({
 interface WeeklyGridProps {
   /** 展示/编辑的是哪个学期（课程与周次均以该学期为准） */
   termId: string
+  /** 学期开学日（第 1 周周一），用于换算每列的“真实日期” */
+  startDate: string
   /** 当前查看的是第几周（用于过滤单双周课程） */
   selectedWeek: number
   /** 学期总周数（透传给编辑弹层限制周区间） */
@@ -130,6 +133,7 @@ interface WeeklyGridProps {
 
 export default function WeeklyGrid({
   termId,
+  startDate,
   selectedWeek,
   totalWeeks,
   editable,
@@ -171,8 +175,9 @@ export default function WeeklyGrid({
     placement: effectivePlacement(course, selectedWeek, overrides),
   }))
 
-  // 今天对应的星期：JS getDay() 周日=0，转成 周一=1 … 周日=7
-  const todayWeekday = ((new Date().getDay() + 6) % 7) + 1
+  // 今天零点（用于“今天”高亮；只看当前这一周对应的真实日期）
+  const now = new Date()
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
 
   /** 手指纵坐标对应的“行内第几节”候选（1 起），并夹取到边界内 */
   function periodAt(clientY: number): number | null {
@@ -392,22 +397,27 @@ export default function WeeklyGrid({
             {/* 网格线（位于底层） */}
             <GridLines />
 
-            {/* 星期标题 */}
-            {WEEKDAYS.map((day) => (
-              <div
-                key={day}
-                className={[
-                  'week-day-header',
-                  day >= 6 ? 'weekend' : '',
-                  day === todayWeekday ? 'today' : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                style={areaStyle(day, 1)}
-              >
-                {WEEKDAY_LABELS[day]}
-              </div>
-            ))}
+            {/* 星期标题（含本周对应的真实日期；仅当该列日期=今天时高亮） */}
+            {WEEKDAYS.map((day) => {
+              const date = termWeekdayDate(startDate, selectedWeek, day)
+              const isToday = date !== null && date.getTime() === todayStart
+              return (
+                <div
+                  key={day}
+                  className={[
+                    'week-day-header',
+                    day >= 6 ? 'weekend' : '',
+                    isToday ? 'today' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  style={areaStyle(day, 1)}
+                >
+                  <span>{WEEKDAY_LABELS[day]}</span>
+                  {date ? <span className="week-day-date">{monthDay(date)}</span> : null}
+                </div>
+              )
+            })}
 
             {/* 空格点击层：点任意空白格新增课程 */}
             {WEEKDAYS.flatMap((day) =>

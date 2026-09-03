@@ -68,6 +68,42 @@ export function todayMondayString(): string {
   return formatDate(mondayOf(new Date()))
 }
 
+/** 学期第 week 周的周一（开学日为第 1 周周一；startDate 非法返回 null） */
+export function termWeekMonday(startDate: string, week: number): Date | null {
+  const base = parseDate(startDate)
+  if (!base) return null
+  const d = new Date(base.getTime())
+  d.setDate(d.getDate() + (week - 1) * 7)
+  return d
+}
+
+/** 学期第 week 周的某一天（weekday：1=周一…7=周日） */
+export function termWeekdayDate(
+  startDate: string,
+  week: number,
+  weekday: number,
+): Date | null {
+  const monday = termWeekMonday(startDate, week)
+  if (!monday) return null
+  const d = new Date(monday.getTime())
+  d.setDate(d.getDate() + (weekday - 1))
+  return d
+}
+
+/** 日期短格式：M/D */
+export function monthDay(date: Date): string {
+  return `${date.getMonth() + 1}/${date.getDate()}`
+}
+
+/** 该周的日期范围标签，如 "9/7–9/13"（非法开学日返回 null） */
+export function termWeekRangeLabel(startDate: string, week: number): string | null {
+  const monday = termWeekMonday(startDate, week)
+  if (!monday) return null
+  const sunday = new Date(monday.getTime())
+  sunday.setDate(sunday.getDate() + 6)
+  return `${monthDay(monday)}–${monthDay(sunday)}`
+}
+
 /** 由开学日(周一)推算：date 落在学期第几周（1 起，越界时收敛到边界） */
 export function weekNumberFor(
   startDate: string,

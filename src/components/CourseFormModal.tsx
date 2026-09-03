@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { COURSE_COLORS, DEFAULT_COURSE_COLOR } from '../lib/colors'
 import { courseStore, findConflictingCourses } from '../lib/courseStore'
-import { courseInWeek } from '../lib/courseWeek'
+import { courseInWeek, DEFAULT_REMIND_MINUTES } from '../lib/courseWeek'
 import { effectivePlacement, overrideStore } from '../lib/overrideStore'
 import { PERIOD_COUNT, getPeriodTime } from '../lib/periods'
 import {
@@ -42,6 +42,16 @@ function samePlacement(
 
 const WEEK_TYPES: WeekType[] = ['every', 'odd', 'even']
 
+/** 课前提醒选项：值=提前分钟数，-1 表示不提醒 */
+const REMIND_OPTIONS: { value: number; label: string }[] = [
+  { value: -1, label: '不提醒' },
+  { value: 0, label: '上课时提醒' },
+  { value: 5, label: '提前 5 分钟' },
+  { value: 10, label: '提前 10 分钟' },
+  { value: 15, label: '提前 15 分钟' },
+  { value: 30, label: '提前 30 分钟' },
+]
+
 export default function CourseFormModal({ editor, totalWeeks, week, onClose }: Props) {
   const isEdit = editor.mode === 'edit'
   const existing = isEdit ? editor.course : null
@@ -69,6 +79,9 @@ export default function CourseFormModal({ editor, totalWeeks, week, onClose }: P
     effectiveNow?.periods ?? existing?.periods ?? 1,
   )
   const [color, setColor] = useState(existing?.color ?? DEFAULT_COURSE_COLOR)
+  const [remindMinutes, setRemindMinutes] = useState<number>(
+    existing?.remindMinutes ?? DEFAULT_REMIND_MINUTES,
+  )
   const [error, setError] = useState('')
 
   // —— 周次 ——
@@ -128,6 +141,7 @@ export default function CourseFormModal({ editor, totalWeeks, week, onClose }: P
       weekType,
       weekStart: safeWeekStart,
       weekEnd: safeWeekEnd,
+      remindMinutes,
     }
 
     if (existing) {
@@ -372,6 +386,27 @@ export default function CourseFormModal({ editor, totalWeeks, week, onClose }: P
                 onClick={() => setColor(c)}
               />
             ))}
+          </div>
+        </div>
+
+        <div className="form-row">
+          <label className="form-row-label" htmlFor="remind-minutes">
+            课前提醒
+          </label>
+          <select
+            id="remind-minutes"
+            className="input"
+            value={remindMinutes}
+            onChange={(e) => setRemindMinutes(Number(e.target.value))}
+          >
+            {REMIND_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <div className="range-hint">
+            导出到系统日历后，由 iPhone“日历”在对应时间通知你
           </div>
         </div>
 
