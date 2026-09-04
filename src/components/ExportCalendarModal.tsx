@@ -14,23 +14,44 @@ interface Props {
   onClose: () => void
 }
 
+/** 导出时可统一覆盖的提前提醒选项（value=分钟，-1=不提醒） */
+const REMIND_OVERRIDES: { value: number | null; label: string }[] = [
+  { value: null, label: '跟随每门课的设置' },
+  { value: -1, label: '本次导出全部不提醒' },
+  { value: 0, label: '全部上课时提醒' },
+  { value: 5, label: '全部提前 5 分钟' },
+  { value: 10, label: '全部提前 10 分钟' },
+  { value: 15, label: '全部提前 15 分钟' },
+  { value: 30, label: '全部提前 30 分钟' },
+]
+
 export default function ExportCalendarModal({ term, onClose }: Props) {
   const courses = useCourses()
   const overrides = useOverrides()
   const [downloaded, setDownloaded] = useState(false)
+  // null=跟随每门课编辑里的设置；数字=导出时统一覆盖
+  const [remindOverride, setRemindOverride] = useState<number | null>(null)
 
   const events = useMemo(
     () => buildCalendarEvents(courses, overrides, term),
     [courses, overrides, term],
   )
-  const summary = useMemo(() => summarizeEvents(events), [events])
+  // 若用户选择了统一提醒时间，则覆盖所有事件的闹钟
+  const exportEvents = useMemo(
+    () =>
+      remindOverride === null
+        ? events
+        : events.map((e) => ({ ...e, remindMinutes: remindOverride })),
+    [events, remindOverride],
+  )
+  const summary = useMemo(() => summarizeEvents(exportEvents), [exportEvents])
 
   function handleDownload() {
     if (!window.confirm('添加后在日历清除比较麻烦，请仔细核对')) {
       return
     }
     const filename = `课程表-${term.name.replace(/[\\/:*?"<>|\s]+/g, '_')}-提醒.ics`
-    downloadIcs(buildIcs(events), filename)
+    downloadIcs(buildIcs(exportEvents), filename)
     setDownloaded(true)
   }
 
@@ -63,6 +84,30 @@ export default function ExportCalendarModal({ term, onClose }: Props) {
           )}
         </div>
 
+        <div className="form-row">
+          <label className="form-row-label" htmlFor="export-remind">
+            提前提醒
+          </label>
+          <select
+            id="export-remind"
+            className="input"
+            value={remindOverride ?? 'course'}
+            onChange={(e) => {
+              const v = e.target.value
+              setRemindOverride(v === 'course' ? null : Number(v))
+            }}
+          >
+            {REMIND_OVERRIDES.map((opt) => (
+              <option key={String(opt.value)} value={opt.value === null ? 'course' : String(opt.value)}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <div className="range-hint">
+            默认跟随每门课编辑里设的提醒时间；也可在此统一覆盖本次导出的所有提醒
+          </div>
+        </div>
+
         <div className="step-list">
           <div>
             <b>1.</b> 点击下方按钮下载「.ics」文件
@@ -71,7 +116,7 @@ export default function ExportCalendarModal({ term, onClose }: Props) {
             <b>2.</b> 在 iPhone「文件」或浏览器下载中找到该文件，点开 → 添加到日历
           </div>
           <div>
-            <b>3.</b> 之后由 iPhone「日历」自动提醒（每门课的提醒时间在编辑课程里设置）
+            <b>3.</b> 之后由 iPhone「日历」自动提醒（提醒时间按上面所选，或每门课自己的设置）
           </div>
         </div>
 
