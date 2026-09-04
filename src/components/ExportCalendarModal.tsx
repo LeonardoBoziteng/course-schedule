@@ -26,6 +26,9 @@ export default function ExportCalendarModal({ term, onClose }: Props) {
   const summary = useMemo(() => summarizeEvents(events), [events])
 
   function handleDownload() {
+    if (!window.confirm('添加后在日历清除比较麻烦，请仔细核对')) {
+      return
+    }
     const filename = `课程表-${term.name.replace(/[\\/:*?"<>|\s]+/g, '_')}-提醒.ics`
     downloadIcs(buildIcs(events), filename)
     setDownloaded(true)

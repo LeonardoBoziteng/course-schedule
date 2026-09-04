@@ -34,9 +34,20 @@ export function weeksOverlap(a: WeekWindow, b: WeekWindow): boolean {
   const lo = Math.max(a.weekStart, b.weekStart)
   const hi = Math.min(a.weekEnd, b.weekEnd)
   if (lo > hi) return false
-  if (a.weekType === 'every' || b.weekType === 'every') return true
-  // 同为单周/同为双周：区间内必有同奇偶的周；奇偶不同则永远不重叠
-  return a.weekType === b.weekType
+  // “每周”与任意：相交区间里存在对方奇偶类型的周才算
+  if (a.weekType === 'every') return hitsParity(b.weekType, lo, hi)
+  if (b.weekType === 'every') return hitsParity(a.weekType, lo, hi)
+  // 同为单周/同为双周：相交区间内存在该奇偶的周才算共同上课
+  if (a.weekType === b.weekType) return hitsParity(a.weekType, lo, hi)
+  // 单周 vs 双周：永不同周
+  return false
+}
+
+/** [lo,hi] 区间内是否存在 weekType 对应的奇偶周（every 恒真） */
+function hitsParity(weekType: WeekType, lo: number, hi: number): boolean {
+  if (weekType === 'every') return true
+  const first = weekType === 'odd' ? (lo % 2 === 1 ? lo : lo + 1) : lo % 2 === 0 ? lo : lo + 1
+  return first <= hi
 }
 
 function clampInt(value: unknown, fallback: number): number {
